@@ -2,7 +2,11 @@
 
 **Slice a part, plan the weld beads, and drive a metal 3D printer — for a cheap gantry or a robot arm.**
 
-![Welder on a gantry building a metal block](docs/machine.gif)
+![Welding torch on a RepRap-style gantry building a metal block](docs/machine.gif)
+
+<sub>Laid out like the machine it targets: printed brackets, smooth-rod linear
+guides, lead screws for Z — and the bed carrying the work in Y while the torch
+moves in X and Z, which is how that frame actually splits its axes.</sub>
 
 ```bash
 python build.py --shape block --gcode block.gcode

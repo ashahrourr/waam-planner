@@ -9,7 +9,8 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from .mjcf import BEAD_RGBA, build_xml, tool_track, weld_segments
+from .mjcf import (BED_TOP, BEAD_RGBA, NOZZLE_TIP, build_xml, tool_track,
+                   weld_segments)
 
 WIDTH, HEIGHT = 1280, 800
 
@@ -17,7 +18,7 @@ WIDTH, HEIGHT = 1280, 800
 def _camera(model, frame, azimuth: float, elevation: float, distance: float):
     cam = mujoco.MjvCamera()
     cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    cam.lookat[:] = [frame.x * 0.5, frame.y * 0.5, frame.z * 0.32]
+    cam.lookat[:] = [frame.x * 0.5, frame.y * 0.5, frame.z * 0.38]
     cam.azimuth = azimuth
     cam.elevation = elevation
     cam.distance = distance
@@ -53,7 +54,11 @@ def render(plan, frame, out: str, seconds: float = 14.0, fps: int = 30,
     written = []
 
     for f, i in enumerate(idx):
-        data.qpos[qx], data.qpos[qy], data.qpos[qz] = pts[i]
+        # The bed carries the work in Y, so reaching part-coordinate py means
+        # translating the bed by Y/2 - py, not moving the torch.
+        data.qpos[qx] = pts[i, 0]
+        data.qpos[qy] = frame.y / 2 - pts[i, 1]
+        data.qpos[qz] = pts[i, 2] + BED_TOP - NOZZLE_TIP
         mujoco.mj_forward(model, data)
 
         # Reveal every bead deposited up to this waypoint.
@@ -62,11 +67,12 @@ def render(plan, frame, out: str, seconds: float = 14.0, fps: int = 30,
             model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
         for gid in bead_ids[upto:]:
             model.geom_rgba[gid] = (0, 0, 0, 0)
-        model.site_rgba[arc_site] = (1.0, 0.96, 0.78, 0.85 if lit[i] else 0.0)
+        if arc_site >= 0:          # a scene without an arc site still renders
+            model.site_rgba[arc_site] = (1.0, 0.96, 0.78, 0.85 if lit[i] else 0.0)
 
         cam = _camera(model, frame,
                       azimuth=135 + spin * f / max(frames - 1, 1),
-                      elevation=-22, distance=frame.x * 2.15)
+                      elevation=-20, distance=frame.x * 2.4)
         renderer.update_scene(data, camera=cam)
         path = tmp / f"f{f:05d}.png"
         _save_png(renderer.render(), path)
@@ -78,7 +84,7 @@ def render(plan, frame, out: str, seconds: float = 14.0, fps: int = 30,
                 model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
             model.site_rgba[arc_site] = (0, 0, 0, 0)
             renderer.update_scene(data, camera=_camera(
-                model, frame, azimuth=142, elevation=-24, distance=frame.x * 2.5))
+                model, frame, azimuth=138, elevation=-21, distance=frame.x * 2.5))
             _save_png(renderer.render(), Path(still))
 
     _encode(tmp, out, fps)
@@ -106,13 +112,13 @@ def still(plan, frame, out: str, azimuth: float = 142.0,
     centre = segments.reshape(-1, 3).mean(axis=0) if len(segments) else np.zeros(3)
     top = segments.reshape(-1, 3)[:, 2].max() if len(segments) else 0.0
     data.qpos[model.joint("x").qposadr[0]] = centre[0]
-    data.qpos[model.joint("y").qposadr[0]] = centre[1]
-    data.qpos[model.joint("z").qposadr[0]] = top + 0.035
+    data.qpos[model.joint("y").qposadr[0]] = frame.y / 2 - centre[1]
+    data.qpos[model.joint("z").qposadr[0]] = top + BED_TOP - NOZZLE_TIP + 0.03
     mujoco.mj_forward(model, data)
 
     renderer = mujoco.Renderer(model, height=height, width=width)
     renderer.update_scene(data, camera=_camera(
-        model, frame, azimuth=azimuth, elevation=-24, distance=frame.x * 2.05))
+        model, frame, azimuth=azimuth, elevation=-24, distance=frame.x * 2.3))
     _save_png(renderer.render(), Path(out))
     return out
 
