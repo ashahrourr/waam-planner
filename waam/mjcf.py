@@ -154,3 +154,94 @@ def tool_track(plan) -> tuple[np.ndarray, np.ndarray]:
             pts.append(value)
             lit.append(arc and kind == "weld")
     return np.array(pts), np.array(lit)
+
+
+# ---------------------------------------------------------------- arm ----
+LINK = "0.30 0.33 0.38 1"
+JOINT_C = "0.55 0.60 0.68 1"
+
+
+def _quat_x(alpha: float) -> str:
+    """Quaternion for a rotation of `alpha` about x, in MuJoCo's w-x-y-z order."""
+    return f"{np.cos(alpha / 2):.9f} {np.sin(alpha / 2):.9f} 0 0"
+
+
+def build_arm_xml(arm, segments: np.ndarray, origin: np.ndarray,
+                  bead_radius: float = 0.0032) -> str:
+    """MJCF for a serial arm described by Denavit-Hartenberg parameters.
+
+    Each DH step is Rot_z(theta) · Trans_z(d) · Trans_x(a) · Rot_x(alpha). The
+    theta part is the joint, so it becomes a hinge about z at the body origin;
+    the rest is fixed, so it becomes the next body's pos and quat. Nesting the
+    bodies that way reproduces the same forward kinematics the planner used.
+    """
+    bodies = ""
+    closing = ""
+    for i, joint in enumerate(arm.joints):
+        pos = "0 0 0" if i == 0 else f"{arm.joints[i-1].a} 0 {arm.joints[i-1].d}"
+        quat = "1 0 0 0" if i == 0 else _quat_x(arm.joints[i - 1].alpha)
+        # Draw the link as a capsule reaching this joint's own a/d offsets.
+        reach = f"{joint.a} 0 {joint.d}"
+        bodies += (
+            f'{"  " * (i + 3)}<body name="l{i}" pos="{pos}" quat="{quat}">\n'
+            f'{"  " * (i + 4)}<joint name="j{i}" type="hinge" axis="0 0 1" '
+            f'range="{joint.lower} {joint.upper}"/>\n'
+            f'{"  " * (i + 4)}<geom type="sphere" size="0.030" rgba="{JOINT_C}"/>\n'
+            f'{"  " * (i + 4)}<geom type="capsule" fromto="0 0 0 {reach}" '
+            f'size="0.022" rgba="{LINK}"/>\n')
+        closing = f'{"  " * (i + 3)}</body>\n' + closing
+
+    last = arm.joints[-1]
+    bodies += (
+        f'{"  " * (len(arm.joints) + 3)}<body name="tool" '
+        f'pos="{last.a} 0 {last.d}" quat="{_quat_x(last.alpha)}">\n'
+        f'{"  " * (len(arm.joints) + 4)}<geom type="capsule" '
+        f'fromto="0 0 0 0 0 -0.05" size="0.012" rgba="{TORCH}"/>\n'
+        f'{"  " * (len(arm.joints) + 4)}<geom type="capsule" '
+        f'fromto="0 0 -0.05 0 0 -0.07" size="0.006" rgba="{TIP}"/>\n'
+        f'{"  " * (len(arm.joints) + 4)}<site name="arc" pos="0 0 -0.072" '
+        f'size="0.007" rgba="1 0.95 0.75 0"/>\n'
+        f'{"  " * (len(arm.joints) + 3)}</body>\n')
+    closing = f'{"  " * (len(arm.joints) + 3)}</body>\n' + closing[len("  " * (len(arm.joints) + 3)) + len("</body>\n"):] \
+        if False else closing
+
+    beads = "\n".join(
+        f'    <geom name="bead{i}" type="capsule" '
+        f'fromto="{a[0]:.5f} {a[1]:.5f} {a[2]:.5f} {b[0]:.5f} {b[1]:.5f} {b[2]:.5f}" '
+        f'size="{bead_radius}" rgba="{HIDDEN}"/>'
+        for i, (a, b) in enumerate(segments))
+
+    table_x, table_y = origin[0], origin[1]
+    return f"""
+<mujoco model="waam-arm">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0" timestep="0.002"/>
+  <visual>
+    <global offwidth="1600" offheight="1200"/>
+    <headlight ambient="0.45 0.45 0.48" diffuse="0.55 0.55 0.58" specular="0.2 0.2 0.2"/>
+    <quality shadowsize="4096" offsamples="8"/>
+    <map znear="0.02" zfar="40"/>
+  </visual>
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.05 0.06 0.09" rgb2="0.01 0.01 0.02" width="256" height="256"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.12 0.13 0.16"
+             rgb2="0.09 0.10 0.13" width="512" height="512"/>
+    <material name="floor" texture="grid" texrepeat="10 10" reflectance="0.08"/>
+    <material name="plate" rgba="0.30 0.32 0.36 1" reflectance="0.15"/>
+  </asset>
+  <worldbody>
+    <light pos="0 0 2.2" dir="0 0 -1" directional="true"
+           diffuse="0.6 0.6 0.6" castshadow="true"/>
+    <light pos="-1.2 -1.2 1.6" dir="1 1 -1" diffuse="0.3 0.3 0.35"/>
+    <geom name="floor" type="plane" size="4 4 0.1" material="floor" pos="0 0 -0.35"/>
+    <geom name="pedestal" type="cylinder" pos="0 0 -0.18" size="0.10 0.18"
+          rgba="0.22 0.24 0.28 1"/>
+    <geom name="table" type="box" pos="{table_x} {table_y} -0.012"
+          size="0.22 0.22 0.012" material="plate"/>
+
+{beads}
+
+{bodies}{closing}  </worldbody>
+</mujoco>
+"""

@@ -141,3 +141,83 @@ def _encode(folder: Path, out: str, fps: int) -> None:
                         "-i", str(folder / "f%05d.png"), "-c:v", "libx264",
                         "-crf", "23", "-preset", "slow", "-pix_fmt", "yuv420p",
                         "-movflags", "+faststart", out], check=True)
+
+
+# ----------------------------------------------------------------- arm ---
+def _arm_scene(plan, arm, origin):
+    from .mjcf import build_arm_xml
+    segments = []
+    for traj in plan.trajectories:
+        segments.extend(traj.xyz[i:i + 2] for i in range(len(traj.xyz) - 1))
+    segments = np.array(segments) if segments else np.zeros((0, 2, 3))
+
+    model = mujoco.MjModel.from_xml_string(build_arm_xml(arm, segments, origin))
+    data = mujoco.MjData(model)
+    qadr = [model.joint(f"j{i}").qposadr[0] for i in range(arm.n)]
+    bead_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"bead{i}")
+                for i in range(len(segments))]
+    return model, data, qadr, bead_ids, segments
+
+
+def _arm_camera(model, origin, azimuth: float, distance: float):
+    cam = mujoco.MjvCamera()
+    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    cam.lookat[:] = [origin[0] * 0.55, origin[1] * 0.55, 0.12]
+    cam.azimuth = azimuth
+    cam.elevation = -20
+    cam.distance = distance
+    return cam
+
+
+def render_arm(plan, arm, origin, out: str, seconds: float = 14.0, fps: int = 30,
+               spin: float = 0.0, width: int = WIDTH, height: int = HEIGHT) -> str:
+    """Animate the arm building the part."""
+    model, data, qadr, bead_ids, segments = _arm_scene(plan, arm, origin)
+    q_all = np.vstack([t.q for t in plan.trajectories])
+    # Waypoint i completes bead segment i-1, offset by the beads already laid.
+    laid = np.concatenate([np.arange(len(t.q)) + off for t, off in
+                           zip(plan.trajectories,
+                               np.cumsum([0] + [len(t.q) - 1
+                                                for t in plan.trajectories[:-1]]))])
+
+    frames = int(seconds * fps)
+    idx = np.linspace(0, len(q_all) - 1, frames).astype(int)
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    arc_site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "arc")
+    tmp = Path(tempfile.mkdtemp(prefix="waam-arm-"))
+
+    for f, i in enumerate(idx):
+        data.qpos[qadr] = q_all[i]
+        mujoco.mj_forward(model, data)
+        upto = min(int(laid[i]), len(bead_ids))
+        for gid in bead_ids[:upto]:
+            model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
+        for gid in bead_ids[upto:]:
+            model.geom_rgba[gid] = (0, 0, 0, 0)
+        model.site_rgba[arc_site] = (1.0, 0.96, 0.78, 0.85)
+        renderer.update_scene(data, camera=_arm_camera(
+            model, origin, 138 + spin * f / max(frames - 1, 1), 1.55))
+        _save_png(renderer.render(), tmp / f"f{f:05d}.png")
+
+    _encode(tmp, out, fps)
+    for path in tmp.glob("f*.png"):
+        path.unlink()
+    tmp.rmdir()
+    return out
+
+
+def still_arm(plan, arm, origin, out: str,
+              width: int = WIDTH, height: int = HEIGHT) -> str:
+    """One frame with the whole part deposited."""
+    model, data, qadr, bead_ids, _ = _arm_scene(plan, arm, origin)
+    for gid in bead_ids:
+        model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
+    data.qpos[qadr] = plan.trajectories[-1].q[-1]
+    mujoco.mj_forward(model, data)
+    arc = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "arc")
+    model.site_rgba[arc] = (0, 0, 0, 0)
+
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    renderer.update_scene(data, camera=_arm_camera(model, origin, 138, 1.5))
+    _save_png(renderer.render(), Path(out))
+    return out

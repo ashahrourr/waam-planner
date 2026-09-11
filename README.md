@@ -85,7 +85,7 @@ consecutive waypoints land in different branches, the arm swings through a big
 reconfiguration **with the arc lit**. Each solve is seeded from the previous to
 stay in one branch, and this catches what slips through.
 
-![Arm mode](docs/build.gif)
+![The arm building the same part](docs/arm.gif)
 
 ## The maths
 
@@ -100,7 +100,7 @@ stay in one branch, and this catches what slips through.
 ## Run it
 
 ```bash
-pip install -r requirements.txt   # numpy, matplotlib, mujoco
+pip install -r requirements.txt   # numpy, mujoco
 
 python build.py                                     # gantry, 90×60×12 mm block
 python build.py --gcode part.gcode --plot m.png     # G-code + a render
@@ -120,8 +120,7 @@ point.
 | `waam/gantry.py` | envelope checks, move planning, G-code |
 | `waam/arm.py` | DH kinematics, Jacobian, damped least-squares IK |
 | `waam/planner.py` | IK over every path point, plus the four checks |
-| `waam/mjcf.py`, `waam/render.py` | the machine as a MuJoCo model, and rendering |
-| `waam/viz.py` | arm-mode plots |
+| `waam/mjcf.py`, `waam/render.py` | both machines as MuJoCo models, and rendering |
 | `tests/` | 29 tests |
 
 <sub>The gantry this targets is the open-source metal printer from Anzalone,

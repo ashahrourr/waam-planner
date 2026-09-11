@@ -100,13 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.gcode:
         print("\n--gcode applies to the gantry; an arm takes joint angles.")
     if args.plot:
-        from waam.viz import plot_plan
-        print("\nwrote", plot_plan(result, arm, args.plot,
-                                   f"{args.shape} — {len(result.trajectories)} beads"))
+        from waam.render import still_arm
+        print("\nwrote", still_arm(result, arm, origin, args.plot))
     if args.video:
-        from waam.viz import animate
-        print("wrote", animate(result, arm, args.video, seconds=args.seconds,
-                               title=f"{args.shape}: {result.bead_length:.1f} m of bead"))
+        from waam.render import render_arm
+        print("wrote", render_arm(result, arm, origin, args.video,
+                                  seconds=args.seconds))
     return 0
 
 
