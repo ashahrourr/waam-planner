@@ -24,13 +24,6 @@ wrote block.gcode (777 lines)
 
 ## What this is for
 
-![The MOST open-source metal printer mid-weld](docs/third-party/most-metal-printer.jpg)
-
-<sub>The machine this targets — a MIG torch on a RepRap-derived frame, built at
-Michigan Tech's Open Sustainability Technology Lab. **Their machine, not mine.**
-Photo uploaded by Joshua M. Pearce, GFDL 1.3; see
-[docs/third-party](docs/third-party/) for the licence and full attribution.</sub>
-
 You can 3D print steel with a **MIG welder on a RepRap frame**, for a couple of
 thousand dollars. That is the machine Anzalone, Zhang, Wijnen, Sanders and
 Pearce published in 2013 — plans, firmware and software all open, and the reason
@@ -107,7 +100,7 @@ stay in one branch, and this catches what slips through.
 ## Run it
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt   # numpy, matplotlib, mujoco
 
 python build.py                                     # gantry, 90×60×12 mm block
 python build.py --gcode part.gcode --plot m.png     # G-code + a render
@@ -127,11 +120,11 @@ point.
 | `waam/gantry.py` | envelope checks, move planning, G-code |
 | `waam/arm.py` | DH kinematics, Jacobian, damped least-squares IK |
 | `waam/planner.py` | IK over every path point, plus the four checks |
-| `waam/viz_gantry.py`, `waam/viz.py` | machine renders and build animations |
+| `waam/mjcf.py`, `waam/render.py` | the machine as a MuJoCo model, and rendering |
+| `waam/viz.py` | arm-mode plots |
 | `tests/` | 29 tests |
 
 <sub>The gantry this targets is the open-source metal printer from Anzalone,
 Zhang, Wijnen, Sanders & Pearce, *A Low-Cost Open-Source Metal 3-D Printer*,
 IEEE Access 1 (2013). Their plans and firmware are published; this is planning
-software written against that class of machine. Code here is MIT; the photo in
-[docs/third-party](docs/third-party/) is GFDL 1.3 and attributed there.</sub>
+software written against that class of machine.</sub>

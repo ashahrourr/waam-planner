@@ -1,0 +1,143 @@
+"""Render a deposition run with MuJoCo."""
+
+from __future__ import annotations
+
+import subprocess
+import tempfile
+from pathlib import Path
+
+import mujoco
+import numpy as np
+
+from .mjcf import BEAD_RGBA, build_xml, tool_track, weld_segments
+
+WIDTH, HEIGHT = 1280, 800
+
+
+def _camera(model, frame, azimuth: float, elevation: float, distance: float):
+    cam = mujoco.MjvCamera()
+    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    cam.lookat[:] = [frame.x * 0.5, frame.y * 0.5, frame.z * 0.32]
+    cam.azimuth = azimuth
+    cam.elevation = elevation
+    cam.distance = distance
+    return cam
+
+
+def render(plan, frame, out: str, seconds: float = 14.0, fps: int = 30,
+           spin: float = 40.0, width: int = WIDTH, height: int = HEIGHT,
+           still: str | None = None) -> str:
+    """Animate the build. Writes an mp4 (or a gif, via ffmpeg)."""
+    segments = weld_segments(plan)
+    pts, lit = tool_track(plan)
+    if not len(pts):
+        raise ValueError("nothing to render")
+
+    model = mujoco.MjModel.from_xml_string(build_xml(frame, segments))
+    data = mujoco.MjData(model)
+
+    bead_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"bead{i}")
+                for i in range(len(segments))]
+    arc_site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "arc")
+    qx = model.joint("x").qposadr[0]
+    qy = model.joint("y").qposadr[0]
+    qz = model.joint("z").qposadr[0]
+
+    # Map each frame of video to a waypoint, and to how many beads exist by then.
+    frames = int(seconds * fps)
+    idx = np.linspace(0, len(pts) - 1, frames).astype(int)
+    laid_by_point = np.cumsum(lit.astype(int)) - 1     # bead index at each point
+
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    tmp = Path(tempfile.mkdtemp(prefix="waam-"))
+    written = []
+
+    for f, i in enumerate(idx):
+        data.qpos[qx], data.qpos[qy], data.qpos[qz] = pts[i]
+        mujoco.mj_forward(model, data)
+
+        # Reveal every bead deposited up to this waypoint.
+        upto = min(max(laid_by_point[i], -1) + 1, len(bead_ids))
+        for gid in bead_ids[:upto]:
+            model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
+        for gid in bead_ids[upto:]:
+            model.geom_rgba[gid] = (0, 0, 0, 0)
+        model.site_rgba[arc_site] = (1.0, 0.96, 0.78, 0.85 if lit[i] else 0.0)
+
+        cam = _camera(model, frame,
+                      azimuth=135 + spin * f / max(frames - 1, 1),
+                      elevation=-22, distance=frame.x * 2.15)
+        renderer.update_scene(data, camera=cam)
+        path = tmp / f"f{f:05d}.png"
+        _save_png(renderer.render(), path)
+        written.append(path)
+
+        if still and f == frames - 1:
+            # Final frame with everything visible, as the static figure.
+            for gid in bead_ids:
+                model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
+            model.site_rgba[arc_site] = (0, 0, 0, 0)
+            renderer.update_scene(data, camera=_camera(
+                model, frame, azimuth=142, elevation=-24, distance=frame.x * 2.5))
+            _save_png(renderer.render(), Path(still))
+
+    _encode(tmp, out, fps)
+    for path in written:
+        path.unlink(missing_ok=True)
+    tmp.rmdir()
+    return out
+
+
+def still(plan, frame, out: str, azimuth: float = 142.0,
+          width: int = WIDTH, height: int = HEIGHT) -> str:
+    """One frame with the finished part and the torch parked above it."""
+    segments = weld_segments(plan)
+    pts, _ = tool_track(plan)
+    model = mujoco.MjModel.from_xml_string(build_xml(frame, segments))
+    data = mujoco.MjData(model)
+
+    for i in range(len(segments)):
+        gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"bead{i}")
+        model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
+
+    # Park over the middle of the part rather than wherever the last bead
+    # finished: an end position near a frame upright puts the torch directly
+    # behind it, and the still then looks as though the head is missing.
+    centre = segments.reshape(-1, 3).mean(axis=0) if len(segments) else np.zeros(3)
+    top = segments.reshape(-1, 3)[:, 2].max() if len(segments) else 0.0
+    data.qpos[model.joint("x").qposadr[0]] = centre[0]
+    data.qpos[model.joint("y").qposadr[0]] = centre[1]
+    data.qpos[model.joint("z").qposadr[0]] = top + 0.035
+    mujoco.mj_forward(model, data)
+
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    renderer.update_scene(data, camera=_camera(
+        model, frame, azimuth=azimuth, elevation=-24, distance=frame.x * 2.05))
+    _save_png(renderer.render(), Path(out))
+    return out
+
+
+def _save_png(pixels: np.ndarray, path: Path) -> None:
+    from PIL import Image
+    Image.fromarray(pixels).save(path)
+
+
+def _encode(folder: Path, out: str, fps: int) -> None:
+    if out.endswith(".gif"):
+        palette = folder / "palette.png"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i",
+                        str(folder / "f%05d.png"), "-vf",
+                        "fps=16,scale=860:-2:flags=lanczos,"
+                        "palettegen=max_colors=96:stats_mode=diff",
+                        str(palette)], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
+                        "-i", str(folder / "f%05d.png"), "-i", str(palette),
+                        "-lavfi", "fps=16,scale=860:-2:flags=lanczos[v];"
+                                  "[v][1:v]paletteuse=dither=none:diff_mode=rectangle",
+                        "-loop", "0", out], check=True)
+        palette.unlink(missing_ok=True)
+    else:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps),
+                        "-i", str(folder / "f%05d.png"), "-c:v", "libx264",
+                        "-crf", "23", "-preset", "slow", "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart", out], check=True)

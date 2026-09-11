@@ -87,15 +87,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nwrote {args.gcode} "
                   f"({len(to_gcode(result, weld).splitlines())} lines)")
         if args.plot:
-            from waam.viz_gantry import plot_machine
-            print("wrote", plot_machine(result, frame, args.plot,
-                f"{args.shape} on a {frame.x * 1000:.0f} mm gantry — "
-                f"{result.beads} beads"))
+            from waam.render import still as render_still
+            print("wrote", render_still(result, frame, args.plot))
         if args.video:
-            from waam.viz_gantry import animate_machine
-            print("wrote", animate_machine(result, frame, args.video,
-                seconds=args.seconds,
-                title=f"{args.shape}: {result.bead_length:.1f} m of bead"))
+            from waam.render import render
+            print("wrote", render(result, frame, args.video, seconds=args.seconds))
         return 0
 
     if not result.trajectories:
