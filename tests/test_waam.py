@@ -192,12 +192,27 @@ def test_out_of_reach_part_is_refused_entirely(arm):
 
 
 def test_tall_part_triggers_collision_refusals(arm):
-    """Once the tower is high enough, the arm cannot stay clear of it."""
+    """Once the tower is high enough, the arm cannot stay clear of it.
+
+    The threshold moved when the kinematics changed from UR5 to the real UR5e:
+    its base is 162 mm rather than 89 mm, so the arm clears a taller part before
+    its links start intersecting what has been deposited.
+    """
+    bead = Bead()
+    profile = rectangle(0.05, 0.05, corner=0.01)
+    result = plan(slice_prism(profile, 0.28, bead), arm, bead,
+                  np.array([-0.40, -0.10, 0.0]), profile)
+    assert any(r.reason == "collision" for r in result.rejections)
+
+
+def test_short_part_has_clearance(arm):
+    """The same tower well under that threshold must plan without refusals."""
     bead = Bead()
     profile = rectangle(0.05, 0.05, corner=0.01)
     result = plan(slice_prism(profile, 0.13, bead), arm, bead,
                   np.array([-0.40, -0.10, 0.0]), profile)
-    assert any(r.reason == "collision" for r in result.rejections)
+    assert result.trajectories
+    assert not result.rejections
 
 
 def test_trajectories_are_continuous(arm):

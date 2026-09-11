@@ -30,16 +30,22 @@ class DH:
     upper: float
 
 
-# UR5-like. Limits are tighter than the real robot's ±2π on purpose: a torch
-# drags a welding cable and a gas hose, so unlimited wrist rotation is not free.
-UR5 = (
-    DH(0.0,     0.0892,  np.pi / 2, -2 * np.pi,  2 * np.pi),
-    DH(-0.425,  0.0,     0.0,       -np.pi,      0.0),
-    DH(-0.392,  0.0,     0.0,       -2.8,        2.8),
-    DH(0.0,     0.1093,  np.pi / 2, -2 * np.pi,  2 * np.pi),
-    DH(0.0,     0.0948, -np.pi / 2, -2 * np.pi,  2 * np.pi),
-    DH(0.0,     0.0825,  0.0,       -3.0,        3.0),
+# Universal Robots UR5e, the published Denavit-Hartenberg parameters. Matching
+# the real robot matters here: the renderer drives the UR5e model from MuJoCo
+# Menagerie with these joint angles, so wrong parameters would put the meshes
+# somewhere the planner never intended.
+#
+# Travel is tightened from the robot's true +/-2*pi on the wrists: a welding
+# torch drags a gas hose and a wire liner, so unlimited rotation is not free.
+UR5E = (
+    DH(0.0,      0.1625, np.pi / 2, -2 * np.pi,  2 * np.pi),
+    DH(-0.425,   0.0,    0.0,       -np.pi,      0.0),
+    DH(-0.3922,  0.0,    0.0,       -2.8,        2.8),
+    DH(0.0,      0.1333, np.pi / 2, -2 * np.pi,  2 * np.pi),
+    DH(0.0,      0.0997, -np.pi / 2, -3.0,       3.0),
+    DH(0.0,      0.0996, 0.0,       -3.0,        3.0),
 )
+UR5 = UR5E          # kept so existing imports keep working
 
 
 def dh_transform(joint: DH, theta: float) -> np.ndarray:
@@ -54,7 +60,7 @@ def dh_transform(joint: DH, theta: float) -> np.ndarray:
 
 
 class Arm:
-    def __init__(self, joints: tuple[DH, ...] = UR5):
+    def __init__(self, joints: tuple[DH, ...] = UR5E):
         self.joints = joints
         self.n = len(joints)
         # Upper bound on how far the tool can get from the base: every link

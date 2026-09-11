@@ -85,7 +85,12 @@ consecutive waypoints land in different branches, the arm swings through a big
 reconfiguration **with the arc lit**. Each solve is seeded from the previous to
 stay in one branch, and this catches what slips through.
 
-![The arm building the same part](docs/arm.gif)
+![A UR5e depositing the same part](docs/arm.gif)
+
+<sub>The real Universal Robots UR5e from
+[MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie), driven by
+the planner's joint angles. `waam/arm.py` uses the published UR5e DH parameters,
+so the planner solves for the robot the renderer draws.</sub>
 
 ## The maths
 
@@ -107,7 +112,7 @@ python build.py --gcode part.gcode --plot m.png     # G-code + a render
 python build.py --machine arm --shape tower --height 0.06
 python build.py --bead-width 0.008 --overlap 0.4    # a different torch
 
-pytest tests/ -q                                    # 29 passed
+pytest tests/ -q                                    # 30 passed
 ```
 
 Shapes: `block`, `tower`, `ring`, `plate`. `--origin` places the work; put it
@@ -121,7 +126,8 @@ point.
 | `waam/arm.py` | DH kinematics, Jacobian, damped least-squares IK |
 | `waam/planner.py` | IK over every path point, plus the four checks |
 | `waam/mjcf.py`, `waam/render.py` | both machines as MuJoCo models, and rendering |
-| `tests/` | 29 tests |
+| `assets/ur5e/` | the UR5e from MuJoCo Menagerie ([notes](assets/README.md)) |
+| `tests/` | 30 tests |
 
 <sub>The gantry this targets is the open-source metal printer from Anzalone,
 Zhang, Wijnen, Sanders & Pearce, *A Low-Cost Open-Source Metal 3-D Printer*,

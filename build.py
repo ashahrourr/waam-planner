@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         origin = np.array(args.origin, dtype=float)
     else:
         origin = (np.array([0.150, 0.150, 0.0]) if args.machine == "gantry"
-                  else np.array([-0.45, -0.15, 0.0]))
+                  else np.array([-0.52, -0.12, -0.34]))
 
     print(f"machine : {args.machine}")
     print(f"shape   : {args.shape}, {args.height * 1000:.0f} mm tall")

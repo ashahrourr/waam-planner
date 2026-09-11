@@ -145,15 +145,17 @@ def _encode(folder: Path, out: str, fps: int) -> None:
 
 # ----------------------------------------------------------------- arm ---
 def _arm_scene(plan, arm, origin):
-    from .mjcf import build_arm_xml
+    from .mjcf import write_arm_scene
     segments = []
     for traj in plan.trajectories:
         segments.extend(traj.xyz[i:i + 2] for i in range(len(traj.xyz) - 1))
     segments = np.array(segments) if segments else np.zeros((0, 2, 3))
 
-    model = mujoco.MjModel.from_xml_string(build_arm_xml(arm, segments, origin))
+    model = mujoco.MjModel.from_xml_path(str(write_arm_scene(segments, origin)))
     data = mujoco.MjData(model)
-    qadr = [model.joint(f"j{i}").qposadr[0] for i in range(arm.n)]
+    qadr = [model.joint(n).qposadr[0] for n in
+            ("shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+             "wrist_1_joint", "wrist_2_joint", "wrist_3_joint")]
     bead_ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"bead{i}")
                 for i in range(len(segments))]
     return model, data, qadr, bead_ids, segments
@@ -162,9 +164,9 @@ def _arm_scene(plan, arm, origin):
 def _arm_camera(model, origin, azimuth: float, distance: float):
     cam = mujoco.MjvCamera()
     cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    cam.lookat[:] = [origin[0] * 0.55, origin[1] * 0.55, 0.12]
+    cam.lookat[:] = [origin[0] * 0.45, origin[1] * 0.45, origin[2] * 0.5 + 0.12]
     cam.azimuth = azimuth
-    cam.elevation = -20
+    cam.elevation = -26
     cam.distance = distance
     return cam
 
@@ -183,7 +185,6 @@ def render_arm(plan, arm, origin, out: str, seconds: float = 14.0, fps: int = 30
     frames = int(seconds * fps)
     idx = np.linspace(0, len(q_all) - 1, frames).astype(int)
     renderer = mujoco.Renderer(model, height=height, width=width)
-    arc_site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "arc")
     tmp = Path(tempfile.mkdtemp(prefix="waam-arm-"))
 
     for f, i in enumerate(idx):
@@ -194,9 +195,8 @@ def render_arm(plan, arm, origin, out: str, seconds: float = 14.0, fps: int = 30
             model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
         for gid in bead_ids[upto:]:
             model.geom_rgba[gid] = (0, 0, 0, 0)
-        model.site_rgba[arc_site] = (1.0, 0.96, 0.78, 0.85)
         renderer.update_scene(data, camera=_arm_camera(
-            model, origin, 138 + spin * f / max(frames - 1, 1), 1.55))
+            model, origin, 152 + spin * f / max(frames - 1, 1), 1.28))
         _save_png(renderer.render(), tmp / f"f{f:05d}.png")
 
     _encode(tmp, out, fps)
@@ -214,10 +214,7 @@ def still_arm(plan, arm, origin, out: str,
         model.geom_rgba[gid] = (*BEAD_RGBA, 1.0)
     data.qpos[qadr] = plan.trajectories[-1].q[-1]
     mujoco.mj_forward(model, data)
-    arc = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "arc")
-    model.site_rgba[arc] = (0, 0, 0, 0)
-
     renderer = mujoco.Renderer(model, height=height, width=width)
-    renderer.update_scene(data, camera=_arm_camera(model, origin, 138, 1.5))
+    renderer.update_scene(data, camera=_arm_camera(model, origin, 152, 1.24))
     _save_png(renderer.render(), Path(out))
     return out

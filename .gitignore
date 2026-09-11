@@ -3,3 +3,8 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .venv/
+
+# vendored robot meshes are large but needed to render
+!assets/ur5e/assets/*.obj
+
+assets/ur5e/_waam_scene.xml
