@@ -219,3 +219,74 @@ def test_planned_points_land_where_asked(arm):
     for traj in result.trajectories[:5]:
         for q, xyz in zip(traj.q, traj.xyz):
             assert np.linalg.norm(arm.tool_position(q) - xyz) < 1e-6
+
+
+# ----------------------------------------------------------------- gantry
+from waam.gantry import Frame, Weld, plan_gantry, to_gcode          # noqa: E402
+
+
+def gantry_plan(height=0.008, origin=(0.150, 0.150, 0.0), frame=None):
+    bead = Bead()
+    profile = rectangle(0.09, 0.06, corner=0.015)
+    return plan_gantry(slice_prism(profile, height, bead),
+                       frame or Frame(), bead, Weld(), np.array(origin)), bead
+
+
+def test_gantry_plans_a_part_on_the_bed():
+    result, _ = gantry_plan()
+    assert result.beads > 0
+    assert result.bead_length > 0.5
+    assert not result.rejections
+
+
+def test_gantry_refuses_points_off_the_bed():
+    result, _ = gantry_plan(origin=(0.290, 0.290, 0.0))
+    assert any(r.reason == "envelope" for r in result.rejections)
+
+
+def test_frame_envelope_bounds():
+    frame = Frame(x=0.3, y=0.3, z=0.25)
+    assert frame.contains(np.array([0.15, 0.15, 0.10]))
+    assert not frame.contains(np.array([0.35, 0.15, 0.10]))
+    assert not frame.contains(np.array([0.15, 0.15, -0.01]))
+
+
+def test_gcode_is_well_formed():
+    result, _ = gantry_plan()
+    text = to_gcode(result, Weld())
+    lines = text.splitlines()
+    assert lines[0].startswith(";")
+    assert "G21" in text and "G90" in text        # mm, absolute
+    assert text.rstrip().endswith("M2 ; end")
+    assert text.count("M3") == text.count("M5") - 1   # one extra M5 at the end
+
+
+def test_arc_is_never_left_on_during_a_dwell():
+    """An interlayer pause with the arc lit burns a hole in the part."""
+    result, _ = gantry_plan(height=0.006)
+    lines = to_gcode(result, Weld()).splitlines()
+    arc = False
+    for line in lines:
+        if line.startswith("M3"):
+            arc = True
+        elif line.startswith("M5"):
+            arc = False
+        elif line.startswith("G4 P2"):            # the interlayer cool
+            assert not arc
+
+
+def test_every_weld_move_is_inside_the_envelope():
+    frame = Frame()
+    result, _ = gantry_plan(frame=frame)
+    for kind, value in result.moves:
+        if kind in ("rapid", "weld"):
+            assert frame.contains(value)
+
+
+def test_travel_between_beads_lifts_clear():
+    """Rapids must go up before crossing, or the torch drags through the part."""
+    result, _ = gantry_plan()
+    rapids = [v for k, v in result.moves if k == "rapid"]
+    assert len(rapids) >= 2
+    # Rapids come in pairs: up to safe height, then down onto the start.
+    assert rapids[0][2] > rapids[1][2]

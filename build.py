@@ -11,11 +11,12 @@ Prints what was planned and, more usefully, what was refused and why.
 from __future__ import annotations
 
 import argparse
-import math
+from pathlib import Path
 
 import numpy as np
 
 from waam.arm import Arm
+from waam.gantry import Frame, Weld, plan_gantry, to_gcode
 from waam.planner import plan
 from waam.slicing import Bead, circle, rectangle, slice_prism
 
@@ -29,30 +30,46 @@ SHAPES = {
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--machine", choices=("gantry", "arm"), default="gantry",
+                    help="gantry: welder on 3 linear axes, like the open-source "
+                         "metal printers. arm: torch on a 6-axis robot.")
     ap.add_argument("--shape", choices=sorted(SHAPES), default="block")
     ap.add_argument("--height", type=float, default=0.012, help="part height, m")
     ap.add_argument("--bead-width", type=float, default=0.006)
     ap.add_argument("--layer-height", type=float, default=0.002)
     ap.add_argument("--overlap", type=float, default=0.30)
-    ap.add_argument("--origin", type=float, nargs=3, default=[-0.45, -0.15, 0.0],
-                    help="where the work sits relative to the arm base, m")
+    ap.add_argument("--origin", type=float, nargs=3, default=None,
+                    help="where the work sits, m (defaults suit each machine)")
+    ap.add_argument("--gcode", metavar="PATH", help="write G-code (gantry only)")
     ap.add_argument("--plot", metavar="PATH")
     ap.add_argument("--video", metavar="PATH")
     ap.add_argument("--seconds", type=float, default=16.0)
     args = ap.parse_args(argv)
 
-    arm = Arm()
     bead = Bead(width=args.bead_width, height=args.layer_height, overlap=args.overlap)
     profile = SHAPES[args.shape]()
-    origin = np.array(args.origin, dtype=float)
-
     layers = slice_prism(profile, args.height, bead)
+
+    # The two machines want the work in different places: a gantry's origin is
+    # the corner of its bed, an arm's is its own base.
+    if args.origin is not None:
+        origin = np.array(args.origin, dtype=float)
+    else:
+        origin = (np.array([0.150, 0.150, 0.0]) if args.machine == "gantry"
+                  else np.array([-0.45, -0.15, 0.0]))
+
+    print(f"machine : {args.machine}")
     print(f"shape   : {args.shape}, {args.height * 1000:.0f} mm tall")
     print(f"bead    : {bead.width * 1000:.1f} mm wide, {bead.height * 1000:.1f} mm layers, "
           f"{bead.stepover * 1000:.1f} mm stepover")
     print(f"sliced  : {len(layers)} layers\n")
 
-    result = plan(layers, arm, bead, origin, profile)
+    arm = Arm()
+    frame, weld = Frame(), Weld()
+    if args.machine == "gantry":
+        result = plan_gantry(layers, frame, bead, weld, origin)
+    else:
+        result = plan(layers, arm, bead, origin, profile)
     print(result.summary())
 
     if result.rejections:
@@ -61,10 +78,31 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  layer {r.layer:2d} path {r.path:3d} point {r.point:3d}  "
                   f"{r.reason:9} {r.detail}")
 
+    if args.machine == "gantry":
+        if not result.beads:
+            print("\nnothing planned — move the work onto the bed with --origin")
+            return 1
+        if args.gcode:
+            Path(args.gcode).write_text(to_gcode(result, weld))
+            print(f"\nwrote {args.gcode} "
+                  f"({len(to_gcode(result, weld).splitlines())} lines)")
+        if args.plot:
+            from waam.viz_gantry import plot_machine
+            print("wrote", plot_machine(result, frame, args.plot,
+                f"{args.shape} on a {frame.x * 1000:.0f} mm gantry — "
+                f"{result.beads} beads"))
+        if args.video:
+            from waam.viz_gantry import animate_machine
+            print("wrote", animate_machine(result, frame, args.video,
+                seconds=args.seconds,
+                title=f"{args.shape}: {result.bead_length:.1f} m of bead"))
+        return 0
+
     if not result.trajectories:
         print("\nnothing planned — move the work closer to the arm with --origin")
         return 1
-
+    if args.gcode:
+        print("\n--gcode applies to the gantry; an arm takes joint angles.")
     if args.plot:
         from waam.viz import plot_plan
         print("\nwrote", plot_plan(result, arm, args.plot,
